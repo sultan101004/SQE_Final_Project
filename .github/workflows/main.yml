@@ -28,9 +28,8 @@ jobs:
       working-directory: ./backend
       run: |
         # Initialize SQLite Database
-        npx prisma driver-adapter --help || true # debug
-        npx prisma generate
-        npx prisma db push --accept-data-loss
+        npx prisma generate --schema=src/prisma/schema.prisma
+        npx prisma db push --schema=src/prisma/schema.prisma --accept-data-loss
         
         # Start server in background
         npm start &
