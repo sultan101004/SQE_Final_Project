@@ -4,27 +4,40 @@ describe('Auth API', () => {
     // Ensure the backend server is running on port 3000 (or the port defined in your env)
     const API_URL = 'http://localhost:3000/api';
 
-    test('POST /users/login should return 200 and a JWT token', async () => {
-        // You might need to adjust these credentials to match a seeded user or register one first
-        const userData = {
-            user: {
-                email: 'jake@jake.jake',
-                password: 'jakejake'
-            }
-        };
+    // Create a unique user for this test run
+    const uniqueId = Date.now();
+    const testUser = {
+        user: {
+            username: `testuser_${uniqueId}`,
+            email: `test${uniqueId}@example.com`,
+            password: 'password123'
+        }
+    };
 
+    test('Should register and then login with 200 OK', async () => {
         try {
-            const response = await axios.post(`${API_URL}/users/login`, userData);
+            // 1. Register
+            const registerResponse = await axios.post(`${API_URL}/users`, testUser);
+            expect(registerResponse.status).toBe(201); // 201 Created
 
-            expect(response.status).toBe(200);
-            expect(response.data.user).toBeDefined();
-            expect(response.data.user.token).toBeDefined();
+            // 2. Login
+            const loginResponse = await axios.post(`${API_URL}/users/login`, {
+                user: {
+                    email: testUser.user.email,
+                    password: testUser.user.password
+                }
+            });
+
+            expect(loginResponse.status).toBe(200);
+            expect(loginResponse.data.user).toBeDefined();
+            expect(loginResponse.data.user.token).toBeDefined();
         } catch (error) {
-            // Check if error is due to connection refused (server not running)
             if (error.code === 'ECONNREFUSED') {
                 throw new Error('Backend server is not running. Please start the server before running tests.');
             }
-            // If request failed (e.g. 401), re-throw to fail the test with details
+            if (error.response) {
+                console.error('API Error Response:', error.response.data);
+            }
             throw error;
         }
     });
