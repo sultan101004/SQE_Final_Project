@@ -1,0 +1,404 @@
+name: CI/CD Pipeline - RealWorld Application
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ============================================
+  # STAGE 1: SOURCE STAGE (Code Repository & Triggering Pipeline)
+  # ============================================
+  source:
+    name: Source Stage - Code Checkout
+    runs-on: ubuntu-latest
+    outputs:
+      commit-sha: ${{ steps.sha.outputs.commit }}
+      branch: ${{ steps.branch.outputs.name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get commit SHA
+        id: sha
+        run: echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+      
+      - name: Get branch name
+        id: branch
+        run: echo "name=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+      
+      - name: Display source information
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ steps.branch.outputs.name }}"
+          echo "Commit SHA: ${{ steps.sha.outputs.commit }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+  # ============================================
+  # STAGE 2: BUILD STAGE (Code Compilation & Artifact Creation)
+  # ============================================
+  build-backend:
+    name: Build Stage - Backend
+    runs-on: ubuntu-latest
+    needs: source
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npx prisma generate
+      
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+      
+      - name: Build Docker image for backend
+        working-directory: ./backend
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }} .
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:latest
+      
+      - name: Upload backend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build
+          path: backend/dist
+          retention-days: 7
+
+  build-frontend:
+    name: Build Stage - Frontend
+    runs-on: ubuntu-latest
+    needs: source
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          CI: false
+      
+      - name: Upload frontend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 7
+
+  # ============================================
+  # STAGE 3: TEST STAGE (Automated Testing)
+  # ============================================
+  test-backend:
+    name: Test Stage - Backend (White-box)
+    runs-on: ubuntu-latest
+    needs: [source, build-backend]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npx prisma generate
+      
+      - name: Run database migrations
+        working-directory: ./backend
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+      
+      - name: Run backend unit tests
+        working-directory: ./backend
+        run: npm test -- --coverage --coverageReporters=text --coverageReporters=lcov
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+          JWT_SECRET: test-secret-key
+          NODE_ENV: test
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+      
+      - name: Check test coverage threshold
+        working-directory: ./backend
+        run: |
+          COVERAGE=$(npm test -- --coverage --coverageReporters=text-summary 2>&1 | grep -oP 'All files\s+\|\s+\d+\.\d+%' | grep -oP '\d+\.\d+' | head -1)
+          echo "Coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below 80% threshold"
+            exit 1
+          fi
+
+  test-frontend:
+    name: Test Stage - Frontend (Black-box)
+    runs-on: ubuntu-latest
+    needs: [source, build-frontend, build-backend]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npx prisma generate
+      
+      - name: Run database migrations
+        working-directory: ./backend
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+      
+      - name: Start backend server
+        working-directory: ./backend
+        run: |
+          npm run build
+          npm start &
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+          JWT_SECRET: test-secret-key
+          NODE_ENV: test
+          PORT: 3000
+      
+      - name: Wait for backend to be ready
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:3000/api/tags; do sleep 2; done'
+      
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Run Cypress E2E tests
+        working-directory: ./frontend
+        run: npx cypress run
+        env:
+          CYPRESS_apiUrl: http://localhost:3000/api
+      
+      - name: Upload Cypress screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 7
+      
+      - name: Upload Cypress videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-videos
+          path: frontend/cypress/videos
+          retention-days: 7
+
+  # ============================================
+  # STAGE 4: STAGING STAGE (Final Testing & Validation)
+  # ============================================
+  staging:
+    name: Staging Stage - Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Push backend Docker image
+        working-directory: ./backend
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }} .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:latest
+      
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Backend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}"
+          # Add actual deployment commands here (e.g., kubectl, docker-compose, etc.)
+          # Example: kubectl set image deployment/backend backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}
+      
+      - name: Run smoke tests on staging
+        run: |
+          echo "Running smoke tests..."
+          # Wait for deployment to be ready
+          sleep 30
+          # Run smoke tests
+          curl -f https://staging.example.com/api/tags || exit 1
+          echo "Smoke tests passed!"
+
+  # ============================================
+  # STAGE 5: DEPLOY STAGE (Production Deployment)
+  # ============================================
+  deploy-production:
+    name: Deploy Stage - Production
+    runs-on: ubuntu-latest
+    needs: [staging]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://production.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Push production Docker images
+        working-directory: ./backend
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }} .
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:production
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:production
+      
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production environment..."
+          echo "Backend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}"
+          # Add actual deployment commands here
+          # Example: kubectl set image deployment/backend backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}
+      
+      - name: Verify production deployment
+        run: |
+          echo "Verifying production deployment..."
+          sleep 30
+          curl -f https://production.example.com/api/tags || exit 1
+          echo "Production deployment verified!"
+      
+      - name: Set up monitoring
+        run: |
+          echo "Setting up monitoring..."
+          # Add monitoring setup commands here
+          # Example: Configure New Relic, Sentry, etc.
+
+  # ============================================
+  # Test Results Summary
+  # ============================================
+  test-summary:
+    name: Test Results Summary
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: always()
+    steps:
+      - name: Generate test summary
+        run: |
+          echo "## Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Backend Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ needs.test-backend.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Frontend Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ needs.test-frontend.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Overall Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.test-backend.result }}" == "success" ] && [ "${{ needs.test-frontend.result }}" == "success" ]; then
+            echo "✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
