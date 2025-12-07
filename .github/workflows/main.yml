@@ -27,15 +27,18 @@ jobs:
     - name: Start Backend
       working-directory: ./backend
       run: |
-        # Seed the database if necessary
-        # npm run seed
+        # Initialize SQLite Database
+        npx prisma driver-adapter --help || true # debug
+        npx prisma generate
+        npx prisma db push --accept-data-loss
+        
         # Start server in background
         npm start &
-        # Wait for server to be ready (naive wait)
+        # Wait for server to be ready
         sleep 15
       env:
         PORT: 3000
-        DATABASE_URL: "file:./dev.db" # Configure as needed for CI
+        DATABASE_URL: "file:./dev.db"
 
     - name: Run Backend Tests
       working-directory: ./backend
