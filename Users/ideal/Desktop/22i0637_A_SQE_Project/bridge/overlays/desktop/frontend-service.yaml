@@ -1,0 +1,9 @@
+#! frontend-service.yaml
+# Generated code, do not edit
+apiVersion: v1
+kind: Service
+metadata:
+    name: frontend-published
+    namespace: 22i0637-a-sqe-project
+spec:
+    type: LoadBalancer

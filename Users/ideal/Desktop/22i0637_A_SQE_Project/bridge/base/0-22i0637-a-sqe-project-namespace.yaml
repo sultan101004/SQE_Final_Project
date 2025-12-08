@@ -1,0 +1,8 @@
+#! 0-22i0637-a-sqe-project-namespace.yaml
+# Generated code, do not edit
+apiVersion: v1
+kind: Namespace
+metadata:
+    name: 22i0637-a-sqe-project
+    labels:
+        com.docker.compose.project: 22i0637_a_sqe_project
