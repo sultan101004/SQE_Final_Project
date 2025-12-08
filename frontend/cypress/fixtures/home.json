@@ -1,0 +1,24 @@
+{
+  "tags": ["sqi", "testing", "demo"],
+  "articles": [
+    {
+      "title": "Smoke Test Article",
+      "slug": "smoke-test-article",
+      "body": "This is a stubbed article body used for Cypress smoke tests.",
+      "description": "Smoke test description",
+      "tagList": ["sqi", "testing"],
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z",
+      "favorited": false,
+      "favoritesCount": 0,
+      "author": {
+        "username": "tester",
+        "bio": "QA",
+        "image": "https://static.productionready.io/images/smiley-cyrus.jpg",
+        "following": false
+      }
+    }
+  ],
+  "articlesCount": 1
+}
+
