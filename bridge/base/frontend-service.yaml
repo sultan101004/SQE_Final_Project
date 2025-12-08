@@ -1,0 +1,19 @@
+#! frontend-service.yaml
+# Generated code, do not edit
+apiVersion: v1
+kind: Service
+metadata:
+    name: frontend-published
+    namespace: 22i0637-a-sqe-project
+    labels:
+        com.docker.compose.project: 22i0637_a_sqe_project
+        com.docker.compose.service: frontend
+spec:
+    selector:
+        com.docker.compose.project: 22i0637_a_sqe_project
+        com.docker.compose.service: frontend
+    ports:
+        - name: frontend-5174
+          port: 5174
+          protocol: TCP
+          targetPort: frontend-5173
