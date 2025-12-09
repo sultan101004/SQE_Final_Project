@@ -8,3 +8,4 @@ FRONTEND_URL="${FRONTEND_URL:-http://localhost:5174/}"
 curl -f "$BACKEND_URL"
 curl -f "$FRONTEND_URL" >/dev/null
 
+
