@@ -1,10 +1,21 @@
 describe('Home (stubbed API)', () => {
+  let fixtureData
+
   beforeEach(() => {
     cy.fixture('home').then((data) => {
-      cy.intercept('GET', '**/api/tags', { tags: data.tags }).as('tags')
-      cy.intercept('GET', '**/api/articles*', {
-        articles: data.articles,
-        articlesCount: data.articlesCount,
+      fixtureData = data
+      cy.intercept('GET', '**/api/tags', {
+        statusCode: 200,
+        body: { tags: data.tags },
+      }).as('tags')
+      cy.intercept('GET', '**/api/articles**', (req) => {
+        req.reply({
+          statusCode: 200,
+          body: {
+            articles: data.articles,
+            articlesCount: data.articlesCount,
+          },
+        })
       }).as('articles')
     })
   })
@@ -13,7 +24,7 @@ describe('Home (stubbed API)', () => {
     cy.visit('/')
     cy.wait('@articles')
     cy.wait('@tags')
-    cy.findByRole('heading', { name: /Smoke Test Article/i }).should('exist')
-    cy.contains('This is a stubbed article body').should('exist')
+    cy.contains('.article-preview h1', fixtureData.articles[0].title).should('exist')
+    cy.contains('.article-preview p', fixtureData.articles[0].body).should('exist')
   })
 })
