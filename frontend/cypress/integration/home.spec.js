@@ -1,25 +1,19 @@
-import makeServer from '../../src/server'
+describe('Home (stubbed API)', () => {
+  beforeEach(() => {
+    cy.fixture('home').then((data) => {
+      cy.intercept('GET', '**/api/tags', { tags: data.tags }).as('tags')
+      cy.intercept('GET', '**/api/articles*', {
+        articles: data.articles,
+        articlesCount: data.articlesCount,
+      }).as('articles')
+    })
+  })
 
-/** @type {import('miragejs').Server} */
-let server
-
-beforeEach(() => {
-  server = makeServer({ environment: 'test' })
-})
-
-afterEach(() => {
-  server.shutdown()
-})
-
-it('Should show the global feed', () => {
-  // ─── ARRANGE ─────────────────────────────────────────────────────
-  const user = server.create('user')
-  const article = server.create('article', { author: user })
-
-  // ─── ACT ─────────────────────────────────────────────────────────
-  cy.visit('/')
-
-  // ─── ASSERT ──────────────────────────────────────────────────────
-  cy.findByRole('heading', { name: article.title }).should('exist')
-  cy.findByText(article.body).should('exist')
+  it('Should show the global feed', () => {
+    cy.visit('/')
+    cy.wait('@articles')
+    cy.wait('@tags')
+    cy.findByRole('heading', { name: /Smoke Test Article/i }).should('exist')
+    cy.contains('This is a stubbed article body').should('exist')
+  })
 })
